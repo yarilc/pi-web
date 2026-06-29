@@ -13,36 +13,54 @@ two LLM-callable tools for the web:
 ## Install
 
 A shell script `pi-web.sh` (at the repo root) manages install, update,
-uninstall, status, and verification. It wraps Pi's native `pi install` /
-`pi remove` commands (idempotent for local paths) and keeps the extension's
-`node_modules` in sync.
+uninstall, status, and verification. It **copies** the extension into the
+Pi agent extensions directory (`~/.pi/agent/extensions/pi-web/` by default) so
+Pi auto-discovers it globally — no `settings.json` entry, no per-project path
+references. Mounting `~/.pi` (or `~/.pi/agent`) into a container makes the
+extension available to every session started inside it.
 
 ```bash
-./pi-web.sh install     # npm install + register with Pi (user settings)
-./pi-web.sh status      # show registration + dependency status
+./pi-web.sh install     # copy extension into the agent dir + install runtime deps
+./pi-web.sh status      # show installation + dependency status
 ./pi-web.sh check       # type-check + unit tests (offline)
-./pi-web.sh update      # npm update + re-register with Pi
-./pi-web.sh uninstall   # remove from Pi settings + delete node_modules
+./pi-web.sh update      # re-copy source + refresh runtime deps
+./pi-web.sh uninstall   # remove the extension from the agent dir
 ```
 
-Add `-l` / `--local` to write to project settings (`.pi/settings.json`)
-instead of user settings (`~/.pi/agent/settings.json`):
+The agent directory honors `PI_CODING_AGENT_DIR` (the same env var Pi uses)
+and falls back to `~/.pi/agent`. Run `./pi-web.sh -h` for the full reference.
+The script resolves the extension source from its own location, so it can be
+invoked from anywhere.
+
+### Use inside a container
+
+Because the extension lives under the agent dir, mounting it into a container
+is all that is needed:
 
 ```bash
-./pi-web.sh install -l
+podman run --rm -it \
+  -v "$HOME/.pi:/root/.pi:ro" \
+  -e HOME=/root \
+  … pi
 ```
 
-Run `./pi-web.sh -h` for the full reference. The script resolves the
-extension directory from its own location, so it can be invoked from anywhere.
+The extension (and any other global extension, skill, or prompt under
+`~/.pi/agent`) is auto-discovered by Pi inside the container.
 
 ### Manual install (without the script)
 
 ```bash
 cd pi-web
-npm install                       # runtime deps (jiti resolves them from node_modules)
-pi install "$PWD"                 # register with Pi (adds to settings, idempotent)
-# or ad-hoc, without persisting to settings:
-pi --extension /path/to/pi-web/src/index.ts
+DEST="$HOME/.pi/agent/extensions/pi-web"
+mkdir -p "$DEST/src"
+cp index.ts "$DEST/"
+cp -R src "$DEST/src"
+# Write a minimal package.json with only the runtime dependencies (no peer
+# deps — Pi provides @earendil-works/pi-* at runtime via loader aliases).
+node -e 'const s=require("./package.json");const d={name:s.name,version:s.version,private:true,type:"module",pi:s.pi,dependencies:s.dependencies};require("fs").writeFileSync(process.argv[1],JSON.stringify(d,null,2)+"\n")' "$DEST/package.json"
+(cd "$DEST" && npm install --omit=dev --no-audit --no-fund)
+# or ad-hoc, without installing into the agent dir:
+pi --extension /path/to/pi-web/index.ts
 ```
 
 No build step is required — Pi loads TypeScript via jiti.
@@ -113,6 +131,7 @@ The unit tests cover the pure helpers only (no network) and can run offline.
 
 ```
 pi-web.sh       # extension manager: install / update / uninstall / status / check
+index.ts        # Pi entry point: re-exports src/index.ts so Pi labels the extension "pi-web"
 src/
   index.ts     # extension factory (registers the tools)
   tools.ts     # Pi tool adapter: parameters, execute, rendering, truncation
