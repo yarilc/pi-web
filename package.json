@@ -1,0 +1,42 @@
+{
+  "name": "pi-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pi extension: web_search and web_fetch tools for searching the web and reading URL content as clean markdown.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "clean": "rm -rf .tsbuildinfo node_modules/.cache",
+    "build": "echo 'no build step (loaded via jiti)'",
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test test/ssrf.test.ts test/extract.test.ts test/search.test.ts"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "linkedom": "^0.18.12",
+    "turndown": "^7.2.4"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.80.0",
+    "@earendil-works/pi-coding-agent": ">=0.80.0",
+    "@earendil-works/pi-tui": ">=0.80.0",
+    "typebox": ">=1.1.38"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.80.2",
+    "@earendil-works/pi-coding-agent": "^0.80.2",
+    "@earendil-works/pi-tui": "^0.80.2",
+    "@types/node": "^22.19.0",
+    "@types/turndown": "^5.0.6",
+    "tsx": "^4.22.4",
+    "typebox": "^1.1.38",
+    "typescript": "5.9.3"
+  }
+}
