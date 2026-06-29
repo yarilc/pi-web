@@ -2,21 +2,27 @@
 #
 # pi-web extension manager: install / update / uninstall / status / check.
 #
-# Copies the extension into the Pi agent extensions directory
+# Builds the extension with esbuild (bundle, pre-compiled JS) and copies the
+# single artifact into the Pi agent extensions directory
 # ($AGENT_DIR/extensions/pi-web, default ~/.pi/agent/extensions/pi-web) so Pi
 # auto-discovers it globally. Because the extension lives under the agent dir,
 # mounting ~/.pi (or ~/.pi/agent) into a container makes the extension
 # available to every session started inside that container — no per-project
 # path references, no settings entries.
 #
+# The pre-compiled bundle (dist/index.mjs) loads without jiti, eliminating
+# the ~13-15s cold-start overhead of runtime TypeScript transpilation. The
+# runtime deps (linkedom, turndown, @mozilla/readability) are bundled in,
+# so the destination needs no node_modules at all — just the single .mjs.
+#
 # The agent dir honors PI_CODING_AGENT_DIR (the same env var Pi uses) and
 # falls back to ~/.pi/agent.
 #
 # Usage:
-#   ./pi-web.sh install      copy extension + install runtime deps into the agent dir
-#   ./pi-web.sh update       re-copy source and refresh runtime deps
+#   ./pi-web.sh install      build + copy the bundle into the agent dir
+#   ./pi-web.sh update       re-build and re-copy the bundle
 #   ./pi-web.sh uninstall    remove the extension from the agent dir
-#   ./pi-web.sh status       show installation and dependency status
+#   ./pi-web.sh status       show installation status
 #   ./pi-web.sh check        run type-check and unit tests (offline)
 #   ./pi-web.sh -h | --help  show this help
 #
@@ -34,7 +40,7 @@ readonly SCRIPT_DIR
 
 # --- extension identity -----------------------------------------------------
 readonly EXT_NAME="pi-web"
-readonly EXT_ENTRY="index.ts"
+readonly EXT_BUNDLE="dist/index.mjs"   # relative to SCRIPT_DIR; the built artifact
 
 # --- resolve the Pi agent directory -----------------------------------------
 # Mirrors Pi's own resolution (config.js getAgentDir): PI_CODING_AGENT_DIR
@@ -69,12 +75,12 @@ usage() {
 Usage: pi-web.sh <command> [options]
 
 Commands:
-  install      Copy the extension into the Pi agent extensions directory and
-               install its runtime dependencies. Pi auto-discovers extensions
-               in that directory, so no settings entry is needed.
-  update       Re-copy the source and refresh the runtime dependencies.
+  install      Build the extension (esbuild bundle) and copy it into the Pi
+               agent extensions directory. Pi auto-discovers extensions in
+               that directory, so no settings entry is needed.
+  update       Re-build and re-copy the bundle.
   uninstall    Remove the extension from the agent extensions directory.
-  status       Show installation and dependency status.
+  status       Show installation status.
   check        Run type-check and unit tests in the source tree (offline).
 
 Options:
@@ -101,46 +107,52 @@ npm_in_source() {
     (cd "$SCRIPT_DIR" && npm "$@")
 }
 
-# Copy the extension source (entry point + src/) into the destination.
-copy_source() {
-    mkdir -p -- "$DEST/src"
-    cp -f -- "$SCRIPT_DIR/$EXT_ENTRY" "$DEST/$EXT_ENTRY"
-    # Recreate src/ contents (not merge into a possibly-stale tree).
-    rm -rf -- "$DEST/src"
-    cp -R -- "$SCRIPT_DIR/src" "$DEST/src"
+# Build the extension bundle with esbuild and copy it into the destination.
+# The bundle is pre-compiled JS with runtime deps (linkedom, turndown,
+# @mozilla/readability) bundled in and Pi peer deps (@earendil-works/*,
+# typebox) kept external so Pi resolves them at runtime via its loader
+# aliases. Loading the bundle skips jiti, eliminating the ~13-15s cold-start
+# overhead of runtime TypeScript transpilation. The destination needs no
+# node_modules — just the single bundle plus a minimal package.json.
+#
+# The bundle is emitted as dist/index.mjs in the source tree (ESM-explicit),
+# then installed into the destination as index.js with a companion
+# package.json declaring "type": "module". This naming is deliberate: Pi
+# derives the extension's display label from the entry-point path segments
+# and strips a trailing "index.ts"/"index.js" (but NOT "index.mjs"), so
+# "index.js" yields the label "pi-web" while "index.mjs" would show as
+# "index.mjs". The package.json makes Node treat index.js as ESM.
+build_and_copy() {
+    hdr "Building extension bundle (esbuild)"
+    npm_in_source run build
+    local bundle_src="$SCRIPT_DIR/$EXT_BUNDLE"
+    if [[ ! -f "$bundle_src" ]]; then
+        printf 'pi-web: build did not produce %s\n' "$EXT_BUNDLE" >&2
+        exit 1
+    fi
+    mkdir -p -- "$DEST"
+    cp -f -- "$bundle_src" "$DEST/index.js"
+    write_dest_package_json "$DEST/package.json"
 }
 
-# Write a minimal package.json into the destination with only the runtime
-# dependencies declared in the source. Stripping peerDependencies is
-# intentional: Pi provides @earendil-works/pi-* and typebox at runtime via
-# loader aliases / virtual modules, and npm v11+ would otherwise install
-# (and duplicate) those peers plus their entire transitive provider SDK tree
-# (anthropic, aws, google, mistral, …) into node_modules. A minimal manifest
-# yields a small, clean node_modules with only the three real runtime deps.
-write_dist_package_json() {
-    node -e '
-        const fs = require("fs");
-        const src = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-        const dist = {
-            name: src.name,
-            version: src.version,
-            private: true,
-            type: src.type || "module",
-            pi: src.pi,
-            dependencies: src.dependencies || {},
-        };
-        fs.writeFileSync(process.argv[2], JSON.stringify(dist, null, 2) + "\n");
-    ' "$SCRIPT_DIR/package.json" "$DEST/package.json"
+# Write a minimal package.json into the destination. "type": "module" makes
+# Node treat index.js as ESM (the bundle uses ESM syntax). The pi.extensions
+# entry points Pi at the installed bundle. No dependencies are declared:
+# runtime deps are bundled in, and Pi provides the peer deps at runtime.
+write_dest_package_json() {
+    cat > "$1" <<'PKGJSON'
+{
+  "name": "pi-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./index.js"
+    ]
+  }
 }
-
-# Install runtime dependencies into the destination.
-# NOTE: --no-audit is intentionally omitted. npm's audit runs as part of
-# `npm install` and is informational only: it never fails the install (exit
-# code stays 0 even with high-severity findings), so the user gets a
-# vulnerability signal surfaced during install without the install being
-# blocked by advisories in dependencies they cannot directly control.
-install_deps() {
-    (cd "$DEST" && npm install --omit=dev --no-fund)
+PKGJSON
 }
 
 # Remove any legacy "packages" entry in settings.json that points back at the
@@ -178,10 +190,7 @@ cmd_install() {
         exit 1
     fi
     mkdir -p -- "$AGENT_DIR/extensions"
-    copy_source
-    write_dist_package_json
-    hdr "Installing runtime dependencies"
-    install_deps
+    build_and_copy
     remove_legacy_registration
     printf '\nDone. %s is installed in the agent extensions directory.\n' "$EXT_NAME"
     printf 'Pi auto-discovers it globally; no settings entry is needed.\n'
@@ -195,10 +204,7 @@ cmd_update() {
         printf '    Run "install" first.\n' >&2
         exit 1
     fi
-    copy_source
-    write_dist_package_json
-    hdr "Refreshing runtime dependencies"
-    install_deps
+    build_and_copy
     printf '\nDone. %s updated.\n' "$EXT_NAME"
 }
 
@@ -222,17 +228,10 @@ cmd_status() {
 
     if [[ -d "$DEST" ]]; then
         printf 'installed:     yes\n'
-        if [[ -f "$DEST/$EXT_ENTRY" ]]; then
-            printf 'entry point:   present (%s)\n' "$EXT_ENTRY"
+        if [[ -f "$DEST/index.js" ]]; then
+            printf 'bundle:        present (%s)\n' "$(du -h "$DEST/index.js" | cut -f1)"
         else
-            printf 'entry point:   MISSING\n'
-        fi
-        if [[ -d "$DEST/node_modules" ]]; then
-            local dep_count
-            dep_count="$(find "$DEST/node_modules" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')"
-            printf 'node_modules:  present (%s top-level packages)\n' "$dep_count"
-        else
-            printf 'node_modules:  missing (run "./pi-web.sh install")\n'
+            printf 'bundle:        MISSING\n'
         fi
     else
         printf 'installed:     no (run "./pi-web.sh install")\n'

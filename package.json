@@ -9,12 +9,12 @@
   },
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.mjs"
     ]
   },
   "scripts": {
-    "clean": "rm -rf .tsbuildinfo node_modules/.cache",
-    "build": "echo 'no build step (loaded via jiti)'",
+    "clean": "rm -rf .tsbuildinfo node_modules/.cache dist",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --external:@earendil-works/* --external:typebox --external:@sinclair/* --outfile=dist/index.mjs",
     "check": "tsc --noEmit",
     "test": "node --import tsx --test test/ssrf.test.ts test/extract.test.ts test/search.test.ts",
     "smoke": "node --import tsx scripts/smoke.ts",
@@ -38,6 +38,7 @@
     "@earendil-works/pi-tui": "^0.80.2",
     "@types/node": "^22.19.0",
     "@types/turndown": "^5.0.6",
+    "esbuild": "^0.28.0",
     "tsx": "^4.22.4",
     "typebox": "^1.1.38",
     "typescript": "5.9.3"

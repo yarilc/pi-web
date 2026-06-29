@@ -20,12 +20,20 @@ references. Mounting `~/.pi` (or `~/.pi/agent`) into a container makes the
 extension available to every session started inside it.
 
 ```bash
-./pi-web.sh install     # copy extension into the agent dir + install runtime deps
-./pi-web.sh status      # show installation + dependency status
+./pi-web.sh install     # build (esbuild bundle) + copy into the agent dir
+./pi-web.sh status      # show installation status
 ./pi-web.sh check       # type-check + unit tests (offline)
-./pi-web.sh update      # re-copy source + refresh runtime deps
+./pi-web.sh update      # re-build and re-copy the bundle
 ./pi-web.sh uninstall   # remove the extension from the agent dir
 ```
+
+The extension is pre-compiled with esbuild into a single bundle
+(`dist/index.mjs`) before being copied. The bundle has the runtime deps
+(linkedom, turndown, @mozilla/readability) bundled in and the Pi peer deps
+kept external (Pi resolves them at runtime), so the destination needs no
+`node_modules` — just the bundle and a minimal `package.json`. Loading the
+pre-compiled bundle skips jiti, eliminating the ~13–15s cold-start overhead
+of runtime TypeScript transpilation.
 
 The agent directory honors `PI_CODING_AGENT_DIR` (the same env var Pi uses)
 and falls back to `~/.pi/agent`. Run `./pi-web.sh -h` for the full reference.
@@ -51,19 +59,29 @@ The extension (and any other global extension, skill, or prompt under
 
 ```bash
 cd pi-web
+npm install                              # dev deps, incl. esbuild
+npm run build                            # esbuild → dist/index.mjs
 DEST="$HOME/.pi/agent/extensions/pi-web"
-mkdir -p "$DEST/src"
-cp index.ts "$DEST/"
-cp -R src "$DEST/src"
-# Write a minimal package.json with only the runtime dependencies (no peer
-# deps — Pi provides @earendil-works/pi-* at runtime via loader aliases).
-node -e 'const s=require("./package.json");const d={name:s.name,version:s.version,private:true,type:"module",pi:s.pi,dependencies:s.dependencies};require("fs").writeFileSync(process.argv[1],JSON.stringify(d,null,2)+"\n")' "$DEST/package.json"
-(cd "$DEST" && npm install --omit=dev --no-fund)
+mkdir -p "$DEST"
+cp dist/index.mjs "$DEST/index.js"       # .js + package.json type:module → ESM
+cat > "$DEST/package.json" <<'JSON'
+{
+  "name": "pi-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "pi": { "extensions": ["./index.js"] }
+}
+JSON
 # or ad-hoc, without installing into the agent dir:
-pi --extension /path/to/pi-web/index.ts
+pi --extension /path/to/pi-web/dist/index.mjs
 ```
 
-No build step is required — Pi loads TypeScript via jiti.
+The bundle is emitted as `dist/index.mjs` (ESM-explicit) but installed as
+`index.js` with a companion `package.json` declaring `"type": "module"`.
+This naming is deliberate: Pi derives the extension's display label from the
+entry-point path segments and strips a trailing `index.ts`/`index.js` (but not
+`index.mjs`), so `index.js` yields the label "pi-web".
 
 ## Tools
 
@@ -121,8 +139,9 @@ hostile or huge page cannot exhaust memory or hang the agent.
 ## Scripts
 
 ```bash
-npm run check        # tsc --noEmit (type-check)
+npm run check        # tsc --noEmit (type-check, offline)
 npm test             # unit tests for the pure SSRF / extraction / search parsers (offline)
+npm run build        # esbuild bundle → dist/index.mjs (pre-compiled, no jiti at load time)
 npm run smoke        # runtime load smoke test (registers both tools via jiti)
 npm run e2e:fetch    # live fetch + extract on example.com (requires egress)
 npm run e2e:search   # live DuckDuckGo search parse (informational; requires egress)
@@ -140,8 +159,7 @@ DuckDuckGo, which rate-limits CI runners, so it is informational only.
 ## Layout
 
 ```
-pi-web.sh       # extension manager: install / update / uninstall / status / check
-index.ts        # Pi entry point: re-exports src/index.ts so Pi labels the extension "pi-web"
+pi-web.sh       # extension manager: build / install / update / uninstall / status / check
 src/
   index.ts     # extension factory (registers the tools)
   tools.ts     # Pi tool adapter: parameters, execute, rendering, truncation
@@ -149,6 +167,8 @@ src/
   ssrf.ts      # pure IP allow/deny logic (testable)
   extract.ts   # pure HTML -> markdown extraction (testable)
   search.ts    # pure DuckDuckGo/SearXNG parsers + URL builders (testable)
+dist/             # build output (gitignored)
+  index.mjs    # esbuild bundle (pre-compiled, runtime deps bundled, Pi peers external)
 test/
   ssrf.test.ts
   extract.test.ts
