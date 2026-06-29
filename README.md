@@ -58,7 +58,7 @@ cp -R src "$DEST/src"
 # Write a minimal package.json with only the runtime dependencies (no peer
 # deps — Pi provides @earendil-works/pi-* at runtime via loader aliases).
 node -e 'const s=require("./package.json");const d={name:s.name,version:s.version,private:true,type:"module",pi:s.pi,dependencies:s.dependencies};require("fs").writeFileSync(process.argv[1],JSON.stringify(d,null,2)+"\n")' "$DEST/package.json"
-(cd "$DEST" && npm install --omit=dev --no-audit --no-fund)
+(cd "$DEST" && npm install --omit=dev --no-fund)
 # or ad-hoc, without installing into the agent dir:
 pi --extension /path/to/pi-web/index.ts
 ```

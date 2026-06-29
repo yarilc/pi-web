@@ -134,8 +134,13 @@ write_dist_package_json() {
 }
 
 # Install runtime dependencies into the destination.
+# NOTE: --no-audit is intentionally omitted. npm's audit runs as part of
+# `npm install` and is informational only: it never fails the install (exit
+# code stays 0 even with high-severity findings), so the user gets a
+# vulnerability signal surfaced during install without the install being
+# blocked by advisories in dependencies they cannot directly control.
 install_deps() {
-    (cd "$DEST" && npm install --omit=dev --no-audit --no-fund)
+    (cd "$DEST" && npm install --omit=dev --no-fund)
 }
 
 # Remove any legacy "packages" entry in settings.json that points back at the
