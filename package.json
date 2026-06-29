@@ -19,7 +19,8 @@
     "test": "node --import tsx --test test/ssrf.test.ts test/extract.test.ts test/search.test.ts",
     "smoke": "node --import tsx scripts/smoke.ts",
     "e2e:fetch": "node --import tsx scripts/e2e-fetch.ts",
-    "e2e:search": "node --import tsx scripts/e2e-search.ts"
+    "e2e:search": "node --import tsx scripts/e2e-search.ts",
+    "verify:bundle": "node --import tsx scripts/verify-bundle.ts"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

@@ -56,7 +56,7 @@ jobs:
         run: npm run smoke
 
       - name: Verify bundle loads (no jiti, registers both tools)
-        run: node -e "const t=[];(await import('./dist/index.mjs')).default({registerTool:d=>t.push(d)});const n=t.map(t=>t.name).sort();if(n.join(',')!=='web_fetch,web_search')throw new Error('unexpected tools: '+n);console.log('bundle loads OK, tools:',n.join(','))"
+        run: npm run verify:bundle
 
   e2e-fetch:
     name: Live fetch + extract (example.com)
