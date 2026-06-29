@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { isDisallowedIp } from "../src/ssrf.ts";
+import { safeFetchText } from "../src/net.ts";
 
 test("isDisallowedIp blocks RFC1918 private IPv4 ranges", () => {
 	assert.equal(isDisallowedIp("10.0.0.1"), true);
@@ -64,4 +65,34 @@ test("isDisallowedIp fails closed on non-IP garbage", () => {
 	assert.equal(isDisallowedIp("not-an-ip"), true);
 	assert.equal(isDisallowedIp(""), true);
 	assert.equal(isDisallowedIp("example.com"), true);
+});
+
+// Integration-level SSRF guard: safeFetchText must reject disallowed hosts
+// by resolving the hostname and checking every resolved address, throwing
+// BEFORE opening any socket. These tests touch no network: the guard runs
+// during URL validation, before the fetch begins. Running them under
+// --network=none confirms the guard does not depend on a refused connection
+// to fail (defense against a regression that would let the request through
+// when the host happens to be reachable).
+test("safeFetchText refuses a loopback IPv4 before connecting", async () => {
+	await assert.rejects(
+		() => safeFetchText("http://127.0.0.1/", { timeoutMs: 5_000 }),
+		(err: unknown) => /refused|private|loopback|disallow|ssrf/i.test(String((err as Error)?.message ?? err)),
+	);
+});
+
+test("safeFetchText refuses a private RFC1918 IPv4 before connecting", async () => {
+	await assert.rejects(
+		() => safeFetchText("http://10.0.0.1/", { timeoutMs: 5_000 }),
+		(err: unknown) => /refused|private|loopback|disallow|ssrf/i.test(String((err as Error)?.message ?? err)),
+	);
+});
+
+test("safeFetchText refuses cloud metadata address before connecting", async () => {
+	// 169.254.169.254 is the AWS/GCP/Azure metadata endpoint; blocking it is
+	// critical to prevent the agent from leaking instance credentials.
+	await assert.rejects(
+		() => safeFetchText("http://169.254.169.254/latest/meta-data/", { timeoutMs: 5_000 }),
+		(err: unknown) => /refused|private|loopback|disallow|ssrf/i.test(String((err as Error)?.message ?? err)),
+	);
 });

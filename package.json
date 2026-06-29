@@ -16,7 +16,10 @@
     "clean": "rm -rf .tsbuildinfo node_modules/.cache",
     "build": "echo 'no build step (loaded via jiti)'",
     "check": "tsc --noEmit",
-    "test": "node --import tsx --test test/ssrf.test.ts test/extract.test.ts test/search.test.ts"
+    "test": "node --import tsx --test test/ssrf.test.ts test/extract.test.ts test/search.test.ts",
+    "smoke": "node --import tsx scripts/smoke.ts",
+    "e2e:fetch": "node --import tsx scripts/e2e-fetch.ts",
+    "e2e:search": "node --import tsx scripts/e2e-search.ts"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

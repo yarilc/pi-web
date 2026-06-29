@@ -121,11 +121,21 @@ hostile or huge page cannot exhaust memory or hang the agent.
 ## Scripts
 
 ```bash
-npm run check   # tsc --noEmit (type-check)
-npm test        # unit tests for the pure SSRF / extraction / search parsers
+npm run check        # tsc --noEmit (type-check)
+npm test             # unit tests for the pure SSRF / extraction / search parsers (offline)
+npm run smoke        # runtime load smoke test (registers both tools via jiti)
+npm run e2e:fetch    # live fetch + extract on example.com (requires egress)
+npm run e2e:search   # live DuckDuckGo search parse (informational; requires egress)
 ```
 
 The unit tests cover the pure helpers only (no network) and can run offline.
+The SSRF guard is covered both at the pure-IP level (`ssrf.test.ts` →
+`isDisallowedIp`) and at the integration level (`ssrf.test.ts` →
+`safeFetchText` refuses private/loopback/metadata hosts before connecting).
+
+The e2e scripts are split by flakiness profile: `e2e:fetch` targets the
+stable IANA example.com page and is a required CI gate; `e2e:search` hits
+DuckDuckGo, which rate-limits CI runners, so it is informational only.
 
 ## Layout
 
@@ -144,6 +154,7 @@ test/
   extract.test.ts
   search.test.ts
 scripts/
-  smoke.ts     # runtime load smoke test (registers both tools via jiti)
-  live-check.ts # live end-to-end network check (needs egress)
+  smoke.ts        # runtime load smoke test (registers both tools via jiti)
+  e2e-fetch.ts   # live fetch + extract on example.com (required CI gate, stable target)
+  e2e-search.ts   # live DuckDuckGo search parse (informational; DDG may rate-limit CI)
 ```
