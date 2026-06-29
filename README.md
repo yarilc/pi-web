@@ -12,22 +12,37 @@ two LLM-callable tools for the web:
 
 ## Install
 
-This is a package-style extension with runtime dependencies, so install them
-once in the extension directory (jiti resolves them from `node_modules`):
+A shell script `pi-web.sh` (at the repo root) manages install, update,
+uninstall, status, and verification. It wraps Pi's native `pi install` /
+`pi remove` commands (idempotent for local paths) and keeps the extension's
+`node_modules` in sync.
+
+```bash
+./pi-web.sh install     # npm install + register with Pi (user settings)
+./pi-web.sh status      # show registration + dependency status
+./pi-web.sh check       # type-check + unit tests (offline)
+./pi-web.sh update      # npm update + re-register with Pi
+./pi-web.sh uninstall   # remove from Pi settings + delete node_modules
+```
+
+Add `-l` / `--local` to write to project settings (`.pi/settings.json`)
+instead of user settings (`~/.pi/agent/settings.json`):
+
+```bash
+./pi-web.sh install -l
+```
+
+Run `./pi-web.sh -h` for the full reference. The script resolves the
+extension directory from its own location, so it can be invoked from anywhere.
+
+### Manual install (without the script)
 
 ```bash
 cd pi-web
-npm install
-```
-
-Then load it in Pi:
-
-```bash
-# ad-hoc
+npm install                       # runtime deps (jiti resolves them from node_modules)
+pi install "$PWD"                 # register with Pi (adds to settings, idempotent)
+# or ad-hoc, without persisting to settings:
 pi --extension /path/to/pi-web/src/index.ts
-
-# or auto-discovered: copy/symlink the directory into your extensions folder
-cp -r pi-web ~/.pi/agent/extensions/pi-web
 ```
 
 No build step is required — Pi loads TypeScript via jiti.
@@ -97,6 +112,7 @@ The unit tests cover the pure helpers only (no network) and can run offline.
 ## Layout
 
 ```
+pi-web.sh       # extension manager: install / update / uninstall / status / check
 src/
   index.ts     # extension factory (registers the tools)
   tools.ts     # Pi tool adapter: parameters, execute, rendering, truncation
@@ -108,4 +124,7 @@ test/
   ssrf.test.ts
   extract.test.ts
   search.test.ts
+scripts/
+  smoke.ts     # runtime load smoke test (registers both tools via jiti)
+  live-check.ts # live end-to-end network check (needs egress)
 ```
