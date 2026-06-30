@@ -8,6 +8,11 @@
  * breaks the bundle (e.g. a missing/incorrect external, a broken import
  * path) would pass the smoke test but fail here.
  *
+ * The committed bundle (index.js at the repo root) is the distribution
+ * artifact used by `pi install git:...`: Pi clones the repo and loads the
+ * bundle directly, with no build step. The CI sync guard (verify job)
+ * ensures the committed index.js matches a fresh build from src/.
+ *
  * Run: node --import tsx scripts/verify-bundle.ts
  *   (tsx is used only so Node can run a .ts runner; the bundle itself is
  *   loaded as plain ESM, the same way Pi loads it at runtime.)
@@ -19,7 +24,7 @@ interface ToolDef {
 }
 
 async function main(): Promise<void> {
-	const bundleUrl = new URL("../dist/index.mjs", import.meta.url);
+	const bundleUrl = new URL("../index.js", import.meta.url);
 	const mod = await import(bundleUrl.href);
 	const factory = mod.default;
 	if (typeof factory !== "function") {

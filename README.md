@@ -20,25 +20,58 @@ references. Mounting `~/.pi` (or `~/.pi/agent`) into a container makes the
 extension available to every session started inside it.
 
 ```bash
-./pi-web.sh install     # build (esbuild bundle) + copy into the agent dir
+./pi-web.sh install     # copy the committed bundle into the agent dir
 ./pi-web.sh status      # show installation status
 ./pi-web.sh check       # type-check + unit tests (offline)
-./pi-web.sh update      # re-build and re-copy the bundle
+./pi-web.sh update      # re-copy the bundle (after pulling changes)
 ./pi-web.sh uninstall   # remove the extension from the agent dir
 ```
 
 The extension is pre-compiled with esbuild into a single bundle
-(`dist/index.mjs`) before being copied. The bundle has the runtime deps
-(linkedom, turndown, @mozilla/readability) bundled in and the Pi peer deps
-kept external (Pi resolves them at runtime), so the destination needs no
-`node_modules` — just the bundle and a minimal `package.json`. Loading the
-pre-compiled bundle skips jiti, eliminating the ~13–15s cold-start overhead
-of runtime TypeScript transpilation.
+(`index.js`, committed at the repo root) before being copied. The bundle has
+the runtime deps (linkedom, turndown, @mozilla/readability) bundled in and
+the Pi peer deps kept external (Pi resolves them at runtime), so the
+destination needs no `node_modules` — just the bundle and a minimal
+`package.json`. Loading the pre-compiled bundle skips jiti, eliminating the
+~13–15s cold-start overhead of runtime TypeScript transpilation.
+
+The bundle is committed to the repo (not built at install time), so this
+script does not require esbuild or any dev dependency — it just copies the
+artifact. The same committed bundle is what `pi install git:...` loads
+(see below).
 
 The agent directory honors `PI_CODING_AGENT_DIR` (the same env var Pi uses)
 and falls back to `~/.pi/agent`. Run `./pi-web.sh -h` for the full reference.
 The script resolves the extension source from its own location, so it can be
 invoked from anywhere.
+
+### Install from git (Pi's package manager)
+
+The repo is structured to be installable with Pi's native git source:
+
+```bash
+pi install git:github.com/yarilc/pi-web
+```
+
+Pi clones the repo into `~/.pi/agent/git/github.com/yarilc/pi-web/` and loads
+the committed `index.js` bundle directly (no build step, no esbuild needed).
+This works because the distribution artifact (`index.js`) is committed and
+the `pi.extensions` manifest points at it.
+
+Use a pinned ref (tag or commit) for reproducibility:
+
+```bash
+pi install git:github.com/yarilc/pi-web@v0.1.0
+```
+
+Update later with `pi update --extensions`.
+
+> **Note on peer deps:** when Pi installs a git source it runs
+> `npm install --omit=dev` **without** `--legacy-peer-deps`, so npm also
+> installs the `@earendil-works/pi-*` peers into the clone's
+> `node_modules`. This is harmless: Pi resolves its own modules via loader
+> aliases at runtime, so the installed peers are unused shadow copies. They
+> add disk usage but do not affect behavior.
 
 ### Use inside a container
 
@@ -60,11 +93,11 @@ The extension (and any other global extension, skill, or prompt under
 ```bash
 cd pi-web
 npm install                              # dev deps, incl. esbuild
-npm run build                            # esbuild → dist/index.mjs
+npm run build                            # esbuild → index.js (committed artifact)
 DEST="$HOME/.pi/agent/extensions/pi-web"
 mkdir -p "$DEST"
-cp dist/index.mjs "$DEST/index.js"       # .js + package.json type:module → ESM
-cat > "$DEST/package.json" <<'JSON'
+cp index.js "$DEST/index.js"
+cat > "$DEST/package.json" <<'JSON
 {
   "name": "pi-web",
   "version": "0.1.0",
@@ -74,14 +107,18 @@ cat > "$DEST/package.json" <<'JSON'
 }
 JSON
 # or ad-hoc, without installing into the agent dir:
-pi --extension /path/to/pi-web/dist/index.mjs
+pi --extension /path/to/pi-web/index.js
 ```
 
-The bundle is emitted as `dist/index.mjs` (ESM-explicit) but installed as
-`index.js` with a companion `package.json` declaring `"type": "module"`.
-This naming is deliberate: Pi derives the extension's display label from the
-entry-point path segments and strips a trailing `index.ts`/`index.js` (but not
-`index.mjs`), so `index.js` yields the label "pi-web".
+The bundle is committed as `index.js` (not `index.mjs`) deliberately: Pi
+derives the extension's display label from the entry-point path segments and
+strips a trailing `index.ts`/`index.js` (but not `index.mjs`), so `index.js`
+yields the label "pi-web". The `package.json` `"type": "module"` makes Node
+treat `index.js` as ESM.
+
+For development, `npm run build` regenerates `index.js` from `src/`; commit
+the result. The CI sync guard (`git diff --exit-code -- index.js`) fails if
+the committed bundle does not match a fresh build.
 
 ## Tools
 
@@ -141,7 +178,7 @@ hostile or huge page cannot exhaust memory or hang the agent.
 ```bash
 npm run check        # tsc --noEmit (type-check, offline)
 npm test             # unit tests for the pure SSRF / extraction / search parsers (offline)
-npm run build        # esbuild bundle → dist/index.mjs (pre-compiled, no jiti at load time)
+npm run build        # esbuild bundle → index.js (committed, distribution artifact)
 npm run smoke        # runtime load smoke test (registers both tools via jiti)
 npm run e2e:fetch    # live fetch + extract on example.com (requires egress)
 npm run e2e:search   # live DuckDuckGo search parse (informational; requires egress)
@@ -159,7 +196,8 @@ DuckDuckGo, which rate-limits CI runners, so it is informational only.
 ## Layout
 
 ```
-pi-web.sh       # extension manager: build / install / update / uninstall / status / check
+pi-web.sh       # extension manager: install / update / uninstall / status / check
+index.js        # COMMITTED esbuild bundle (distribution artifact; what `pi install git:` loads)
 src/
   index.ts     # extension factory (registers the tools)
   tools.ts     # Pi tool adapter: parameters, execute, rendering, truncation
@@ -167,14 +205,13 @@ src/
   ssrf.ts      # pure IP allow/deny logic (testable)
   extract.ts   # pure HTML -> markdown extraction (testable)
   search.ts    # pure DuckDuckGo/SearXNG parsers + URL builders (testable)
-dist/             # build output (gitignored)
-  index.mjs    # esbuild bundle (pre-compiled, runtime deps bundled, Pi peers external)
 test/
   ssrf.test.ts
   extract.test.ts
   search.test.ts
 scripts/
   smoke.ts        # runtime load smoke test (registers both tools via jiti)
+  verify-bundle.ts # asserts the committed index.js loads (no jiti) and registers both tools
   e2e-fetch.ts   # live fetch + extract on example.com (required CI gate, stable target)
   e2e-search.ts   # live DuckDuckGo search parse (informational; DDG may rate-limit CI)
 ```

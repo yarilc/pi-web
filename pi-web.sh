@@ -2,25 +2,35 @@
 #
 # pi-web extension manager: install / update / uninstall / status / check.
 #
-# Builds the extension with esbuild (bundle, pre-compiled JS) and copies the
-# single artifact into the Pi agent extensions directory
-# ($AGENT_DIR/extensions/pi-web, default ~/.pi/agent/extensions/pi-web) so Pi
-# auto-discovers it globally. Because the extension lives under the agent dir,
-# mounting ~/.pi (or ~/.pi/agent) into a container makes the extension
-# available to every session started inside that container — no per-project
-# path references, no settings entries.
+# Copies the committed pre-compiled bundle (index.js at the repo root) into
+# the Pi agent extensions directory ($AGENT_DIR/extensions/pi-web, default
+# ~/.pi/agent/extensions/pi-web) so Pi auto-discovers it globally. Because
+# the extension lives under the agent dir, mounting ~/.pi (or ~/.pi/agent)
+# into a container makes the extension available to every session started
+# inside that container — no per-project path references, no settings
+# entries.
 #
-# The pre-compiled bundle (dist/index.mjs) loads without jiti, eliminating
+# The bundle is pre-compiled JS (built once with esbuild and committed) with
+# runtime deps (linkedom, turndown, @mozilla/readability) bundled in and Pi
+# peer deps (@earendil-works/*, typebox) kept external so Pi resolves them at
+# runtime via its loader aliases. Loading the bundle skips jiti, eliminating
 # the ~13-15s cold-start overhead of runtime TypeScript transpilation. The
-# runtime deps (linkedom, turndown, @mozilla/readability) are bundled in,
-# so the destination needs no node_modules at all — just the single .mjs.
+# destination needs no node_modules at all — just the bundle plus a minimal
+# package.json.
+#
+# Because the bundle is committed (not built at install time), this script
+# does not require esbuild or any dev dependency — it just copies the
+# artifact. The same committed bundle is what `pi install git:...` loads:
+# Pi clones the repo and reads index.js directly, with no build step. The
+# `npm run build` script regenerates index.js from src/ for developers; the
+# CI sync guard asserts the committed bundle matches a fresh build.
 #
 # The agent dir honors PI_CODING_AGENT_DIR (the same env var Pi uses) and
 # falls back to ~/.pi/agent.
 #
 # Usage:
-#   ./pi-web.sh install      build + copy the bundle into the agent dir
-#   ./pi-web.sh update       re-build and re-copy the bundle
+#   ./pi-web.sh install      copy the committed bundle into the agent dir
+#   ./pi-web.sh update       re-copy the bundle (use after pulling changes)
 #   ./pi-web.sh uninstall    remove the extension from the agent dir
 #   ./pi-web.sh status       show installation status
 #   ./pi-web.sh check        run type-check and unit tests (offline)
@@ -40,7 +50,7 @@ readonly SCRIPT_DIR
 
 # --- extension identity -----------------------------------------------------
 readonly EXT_NAME="pi-web"
-readonly EXT_BUNDLE="dist/index.mjs"   # relative to SCRIPT_DIR; the built artifact
+readonly EXT_BUNDLE="index.js"   # committed pre-compiled bundle at the repo root
 
 # --- resolve the Pi agent directory -----------------------------------------
 # Mirrors Pi's own resolution (config.js getAgentDir): PI_CODING_AGENT_DIR
@@ -75,10 +85,10 @@ usage() {
 Usage: pi-web.sh <command> [options]
 
 Commands:
-  install      Build the extension (esbuild bundle) and copy it into the Pi
+  install      Copy the committed pre-compiled bundle (index.js) into the Pi
                agent extensions directory. Pi auto-discovers extensions in
                that directory, so no settings entry is needed.
-  update       Re-build and re-copy the bundle.
+  update       Re-copy the bundle (run after pulling changes to the repo).
   uninstall    Remove the extension from the agent extensions directory.
   status       Show installation status.
   check        Run type-check and unit tests in the source tree (offline).
@@ -107,27 +117,32 @@ npm_in_source() {
     (cd "$SCRIPT_DIR" && npm "$@")
 }
 
-# Build the extension bundle with esbuild and copy it into the destination.
-# The bundle is pre-compiled JS with runtime deps (linkedom, turndown,
-# @mozilla/readability) bundled in and Pi peer deps (@earendil-works/*,
-# typebox) kept external so Pi resolves them at runtime via its loader
-# aliases. Loading the bundle skips jiti, eliminating the ~13-15s cold-start
-# overhead of runtime TypeScript transpilation. The destination needs no
-# node_modules — just the single bundle plus a minimal package.json.
+# Copy the committed pre-compiled bundle (index.js) into the destination,
+# together with a minimal package.json.
 #
-# The bundle is emitted as dist/index.mjs in the source tree (ESM-explicit),
-# then installed into the destination as index.js with a companion
-# package.json declaring "type": "module". This naming is deliberate: Pi
-# derives the extension's display label from the entry-point path segments
-# and strips a trailing "index.ts"/"index.js" (but NOT "index.mjs"), so
-# "index.js" yields the label "pi-web" while "index.mjs" would show as
-# "index.mjs". The package.json makes Node treat index.js as ESM.
-build_and_copy() {
-    hdr "Building extension bundle (esbuild)"
-    npm_in_source run build
+# The bundle is pre-compiled JS (committed at the repo root) with runtime deps
+# (linkedom, turndown, @mozilla/readability) bundled in and Pi peer deps
+# (@earendil-works/*, typebox) kept external so Pi resolves them at runtime
+# via its loader aliases. Loading the bundle skips jiti, eliminating the
+# ~13-15s cold-start overhead of runtime TypeScript transpilation. The
+# destination needs no node_modules — just the bundle plus a minimal
+# package.json.
+#
+# Because the bundle is committed (not built at install time), this installer
+# does not require esbuild or any dev dependency — it just copies the
+# artifact. This is what makes the same repo installable both via this script
+# and via `pi install git:...` (which clones the repo and has no build step).
+#
+# The bundle is named index.js (not index.mjs) deliberately: Pi derives the
+# extension's display label from the entry-point path segments and strips a
+# trailing "index.ts"/"index.js" (but NOT "index.mjs"), so "index.js" yields
+# the label "pi-web" while "index.mjs" would show as "index.mjs". The
+# package.json's "type": "module" makes Node treat index.js as ESM.
+copy_bundle() {
     local bundle_src="$SCRIPT_DIR/$EXT_BUNDLE"
     if [[ ! -f "$bundle_src" ]]; then
-        printf 'pi-web: build did not produce %s\n' "$EXT_BUNDLE" >&2
+        printf 'pi-web: pre-compiled bundle not found: %s\n' "$bundle_src" >&2
+        printf '    Run "npm run build" in the source tree to regenerate it, then commit.\n' >&2
         exit 1
     fi
     mkdir -p -- "$DEST"
@@ -190,7 +205,7 @@ cmd_install() {
         exit 1
     fi
     mkdir -p -- "$AGENT_DIR/extensions"
-    build_and_copy
+    copy_bundle
     remove_legacy_registration
     printf '\nDone. %s is installed in the agent extensions directory.\n' "$EXT_NAME"
     printf 'Pi auto-discovers it globally; no settings entry is needed.\n'
@@ -204,7 +219,7 @@ cmd_update() {
         printf '    Run "install" first.\n' >&2
         exit 1
     fi
-    build_and_copy
+    copy_bundle
     printf '\nDone. %s updated.\n' "$EXT_NAME"
 }
 

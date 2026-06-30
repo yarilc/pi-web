@@ -49,8 +49,16 @@ jobs:
       - name: Unit tests (offline)
         run: npm test
 
-      - name: Build bundle (esbuild → dist/index.mjs)
+      - name: Build bundle (esbuild → index.js)
         run: npm run build
+
+      # Sync guard: the committed index.js is the distribution artifact used
+      # by `pi install git:...` (Pi clones the repo and loads it directly,
+      # no build). Assert the committed bundle matches a fresh build from
+      # src/ so it can never drift stale. `git diff --exit-code` fails if
+      # `npm run build` above produced different bytes than what is committed.
+      - name: Assert committed bundle is up to date
+        run: git diff --exit-code -- index.js
 
       - name: Smoke test (extension loads, registers both tools via jiti)
         run: npm run smoke

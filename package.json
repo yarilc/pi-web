@@ -9,12 +9,12 @@
   },
   "pi": {
     "extensions": [
-      "./dist/index.mjs"
+      "./index.js"
     ]
   },
   "scripts": {
     "clean": "rm -rf .tsbuildinfo node_modules/.cache dist",
-    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --external:@earendil-works/* --external:typebox --external:@sinclair/* --outfile=dist/index.mjs",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --external:@earendil-works/* --external:typebox --external:@sinclair/* --outfile=index.js",
     "check": "tsc --noEmit",
     "test": "node --import tsx --test test/ssrf.test.ts test/extract.test.ts test/search.test.ts",
     "smoke": "node --import tsx scripts/smoke.ts",
