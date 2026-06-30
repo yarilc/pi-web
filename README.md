@@ -170,6 +170,33 @@ public address for the check and a private one for the real connection) is still
 possible. Treat the guard as a footgun reducer. Run Pi inside a container or
 network-restricted sandbox when fetching untrusted content unattended.
 
+### Recommended: run inside pi-container
+
+For real isolation, run Pi inside
+[pi-container](https://github.com/yarilc/pi-container) — a rootless Podman
+wrapper purpose-built for Pi. It runs Pi with a read-only root filesystem,
+dropped capabilities (`--cap-drop=ALL`), `no-new-privileges`, resource limits,
+and SELinux labels, while transparently mapping container file ownership back
+to your host user. Extensions installed under `~/.pi/agent/extensions/`
+(including this one) are auto-discovered inside the container exactly as on
+the host.
+
+For untrusted content, combine it with the two flags that neutralize the
+residual SSRF/data-exfiltration risks:
+
+```bash
+# Read-only Pi config (prevents a subverted agent from planting persistent
+# malicious extensions/skills) + no network egress:
+PI_READONLY_CONFIG=1 PI_NETWORK=none pic "fetch and summarize this untrusted page"
+```
+
+`PI_NETWORK=none` blocks all outbound traffic, so even a DNS-rebinding or
+SSRF bypass cannot reach an internal host. `PI_READONLY_CONFIG=1` mounts
+`~/.pi` and `~/.agents` read-only so a compromised agent cannot persist
+malicious extensions across runs. See the pi-container
+[SECURITY.md](https://github.com/yarilc/pi-container/blob/main/SECURITY.md)
+for the full threat model.
+
 Responses are size-capped (2MB body) and timeout-capped (20s, abort-aware) so a
 hostile or huge page cannot exhaust memory or hang the agent.
 
