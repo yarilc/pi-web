@@ -55,10 +55,16 @@ jobs:
       # Sync guard: the committed index.js is the distribution artifact used
       # by `pi install git:...` (Pi clones the repo and loads it directly,
       # no build). Assert the committed bundle matches a fresh build from
-      # src/ so it can never drift stale. `git diff --exit-code` fails if
-      # `npm run build` above produced different bytes than what is committed.
+      # src/ so it can never drift stale. We rebuild into a temp file and
+      # compare with `cmp` (not `git diff`) because the node:22-bookworm-slim
+      # container does not ship git. A mismatch fails the gate.
       - name: Assert committed bundle is up to date
-        run: git diff --exit-code -- index.js
+        run: |
+          npm run build -- --outfile=/tmp/index.fresh.js
+          cmp --silent index.js /tmp/index.fresh.js && echo "bundle is up to date" || {
+            echo "::error::committed index.js differs from a fresh build; run 'npm run build' and commit index.js"
+            exit 1
+          }
 
       - name: Smoke test (extension loads, registers both tools via jiti)
         run: npm run smoke
